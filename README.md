@@ -412,3 +412,488 @@ You must:
 Timeline: **12–24 months** to full coverage.
 
 ---
+
+The goal now is:
+
+> **Intentribution = rights + identity + UX + payments platform**
+> while **delivery = delegated to an enterprise upstream distributor**
+
+This lets you ship fast, get full coverage, and later peel off DSPs into direct pipes when you have leverage.
+
+I’ll give you:
+
+1. Partner selection (who to integrate with)
+2. Core system architecture
+3. Data model you actually need
+4. Release → delivery → royalty flow
+5. Migration path to direct DSP later
+
+No fluff.
+
+---
+
+## 1. Upstream Partner Selection (This choice defines your future)
+
+There are only a few real enterprise-grade backends.
+
+### Tier 1 — Best for real platforms
+
+#### 🔹 FUGA (Downtown Music)
+
+**Gold standard.** Used by:
+
+* Sony sublabels
+* AWAL
+* Hundreds of real labels
+
+Pros:
+
+* Full global DSP coverage
+* Publishing + neighboring rights optional
+* Rock-solid reporting
+* Future-proof if you go direct later
+
+Cons:
+
+* Expensive (setup + revenue share)
+* Selective
+* Enterprise sales cycle
+
+If you want Intentribution to become serious → **this is the best long-term choice.**
+
+---
+
+#### 🔹 SonoSuite
+
+Best balance for startups.
+
+Pros:
+
+* Covers all majors
+* Modern API
+* Easier onboarding
+* Used by many new distributors
+
+Cons:
+
+* Slightly less depth than FUGA
+* Fewer advanced publishing tools
+
+This is the **best default recommendation** for a new platform.
+
+---
+
+#### 🔹 Revelator
+
+Best if you care about:
+
+* Publishing
+* Label tools
+* Creator monetization
+
+Cons:
+
+* Heavier platform
+* More opinionated workflows
+
+---
+
+### Avoid for platform use
+
+* DistroKid
+* TuneCore
+* CD Baby
+
+These are **retail distributors**, not infrastructure providers.
+They do not want you as a platform on top.
+
+---
+
+## 2. High-Level Architecture (What Intentribution Actually Is)
+
+Your system becomes:
+
+```
+Artist / Label
+     ↓
+Intentribution Platform
+  - Identity
+  - Metadata
+  - Rights
+  - Validation
+  - Payments
+  - UX / API
+     ↓
+Upstream Distributor (FUGA / SonoSuite / Revelator)
+     ↓
+DSPs (Spotify, Apple, Amazon, YT, TikTok, Meta, etc)
+     ↓
+Royalty Reports
+     ↓
+Upstream → Intentribution → Artists
+```
+
+Key principle:
+
+> **You own the source of truth.**
+> Upstream is just a transport + reporting layer.
+
+---
+
+## 3. Core System Design (what you must build first)
+
+This is the minimum serious platform core.
+
+### 3.1 Identity & Catalog Layer (foundation)
+
+Tables you absolutely need:
+
+#### Artist
+
+```
+id
+name
+normalized_name
+primary_email
+spotify_artist_id
+apple_artist_id
+youtube_channel_id
+country
+status
+```
+
+#### Label / Account
+
+```
+id
+name
+type (artist/label/enterprise)
+commission_rate
+payout_currency
+tax_profile
+```
+
+#### Release
+
+```
+id
+upc
+title
+primary_artist_id
+label_id
+release_date
+artwork_url
+status (draft / validated / delivered / live / error)
+territories
+```
+
+#### Track
+
+```
+id
+isrc
+title
+release_id
+duration
+explicit
+audio_fingerprint
+primary_artist_id
+ownership_version
+```
+
+---
+
+### 3.2 Rights & Splits Engine (this is your moat)
+
+You must version ownership.
+
+```
+TrackOwnership
+  - track_id
+  - contributor_id
+  - role (artist, producer, writer)
+  - percentage
+  - territory
+  - effective_from
+  - effective_to
+```
+
+Rules:
+
+* Total must = 100%
+* Changes create new version
+* Old versions preserved for back royalties
+
+This is how you avoid lawsuits later.
+
+---
+
+### 3.3 Validation Engine (prevents DSP rejections)
+
+Build an internal validator before anything leaves your system.
+
+Core checks:
+
+* Audio spec compliance
+* ISRC uniqueness per audio hash
+* Artist identity consistency
+* No title spam
+* No forbidden metadata
+* Territory conflicts
+* Ownership = 100%
+
+Example:
+
+```
+validate_release():
+  assert all_tracks_have_isrc()
+  assert no_duplicate_audio()
+  assert splits_sum_100()
+  assert artist_ids_mapped()
+  assert artwork_specs_ok()
+```
+
+If this layer is strong → upstream rarely rejects → DSP trust builds.
+
+---
+
+## 4. Integration With Upstream Distributor
+
+This is the critical technical interface.
+
+### 4.1 What You Send Them
+
+You will push:
+
+* Audio files
+* Artwork
+* Metadata
+* ISRCs
+* UPC
+* Ownership
+* Territory rules
+
+Either via:
+
+* REST API
+* SFTP + JSON/XML manifests
+
+They convert this into:
+
+* DDEX ERN
+* DSP-specific formats
+
+---
+
+### 4.2 Status & Error Handling
+
+You must track:
+
+```
+DeliveryStatus
+  - release_id
+  - upstream_id
+  - dsp
+  - state (sent / processing / live / rejected)
+  - error_code
+  - error_message
+```
+
+This lets you expose:
+
+* Per-platform status
+* Rejection diagnostics
+* Retry pipelines
+
+---
+
+## 5. Royalty Ingestion & Ledger (do this right from day 1)
+
+Upstream will send you:
+
+* Monthly / biweekly reports
+* Per DSP
+* Per territory
+* Per track
+
+You must normalize into a **ledger**.
+
+### 5.1 Raw Report Table
+
+```
+RawRoyaltyRow
+  - upstream_report_id
+  - dsp
+  - territory
+  - isrc
+  - streams
+  - gross_amount
+  - currency
+  - period
+```
+
+### 5.2 Allocation Engine
+
+```
+allocate():
+  map_isrc_to_track()
+  apply_commission()
+  split_by_ownership()
+  create_ledger_entries()
+```
+
+### 5.3 Ledger
+
+```
+LedgerEntry
+  - account_id
+  - artist_id
+  - track_id
+  - dsp
+  - period
+  - gross
+  - commission
+  - net
+  - status (pending / payable / paid)
+```
+
+This supports:
+
+* Multi-artist splits
+* Label overrides
+* Retroactive changes
+* Audits
+
+---
+
+## 6. Payments Layer
+
+You’ll need:
+
+* Stripe Connect (best default)
+* PayPal MassPay (secondary)
+* Wise for international
+
+Support:
+
+* Minimum thresholds
+* Multi-currency
+* Tax forms (W-9, W-8BEN)
+
+Flow:
+
+```
+Ledger → Balance → PayoutRequest → Stripe Transfer → Receipt
+```
+
+---
+
+## 7. Platform Coverage (what you’ll get instantly via Path A)
+
+With the right upstream partner you automatically get:
+
+### Major DSPs
+
+* Spotify
+* Apple Music
+* Amazon Music
+* YouTube Music
+* Pandora
+* Tidal
+* Deezer
+
+### Social / UGC
+
+* TikTok
+* Instagram / Facebook
+* YouTube Content ID
+* Snapchat
+* Triller
+
+### Global Stores
+
+* Boomplay
+* Anghami
+* Joox
+* Tencent
+* Yandex
+
+This is effectively **worldwide coverage** from day one.
+
+---
+
+## 8. Migration Path to Direct DSP (future-proofing Intentribution)
+
+Design now so you can later bypass upstream.
+
+Key rules:
+
+### Rule 1 — You own all IDs
+
+Always store:
+
+* ISRC
+* UPC
+* Artist platform IDs
+* Upstream IDs
+
+Never let upstream be your only identity layer.
+
+---
+
+### Rule 2 — Abstract the Delivery Layer
+
+Internally design:
+
+```
+deliver_release(release, target):
+   if target == "upstream":
+       send_to_partner()
+   if target == "spotify_direct":
+       send_to_spotify()
+```
+
+So later you can:
+
+* Send Spotify direct
+* Apple direct
+* Leave long-tail on upstream
+
+This is exactly how AWAL and TuneCore evolved.
+
+---
+
+## 9. What I’d Recommend For You Specifically
+
+Given:
+
+* You’re an architect
+* You build infrastructure platforms
+* You care about scalability
+
+**Best path:**
+
+### Phase 1
+
+* Partner with **SonoSuite** (fastest + startup-friendly)
+* Build:
+
+  * Identity system
+  * Rights + splits
+  * Validation engine
+  * Ledger + payouts
+  * API-first design
+
+### Phase 2 (12–24 months)
+
+* Move Spotify + Apple to direct
+* Keep long-tail DSPs on upstream
+* Add publishing / neighboring rights
+
+This gives Intentribution:
+
+* Full coverage
+* Real moat
+* Upgrade path to top-tier distributor
+
+---
